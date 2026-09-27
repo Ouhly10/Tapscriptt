@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>موقّع PSBT — Taproot Script-Path</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#141b24; --panel2:#1a2330; --line:#2a3542;
+    --text:#e6edf3; --sub:#8b98a5; --accent:#4fc3a1; --accent2:#e0a352;
+    --danger:#e5726b; --mono:'SF Mono','Fira Code',Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:'Segoe UI','Tahoma',sans-serif; line-height:1.6;
+    padding:32px 16px 80px;
+  }
+  .wrap{max-width:880px;margin:0 auto;}
+  header{margin-bottom:28px;}
+  h1{font-size:1.5rem;margin:0 0 6px;font-weight:700;}
+  .sub{color:var(--sub);font-size:.92rem;}
+  section{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:20px 22px; margin-bottom:18px;
+  }
+  section h2{
+    font-size:1rem; margin:0 0 16px; color:var(--accent);
+    display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--line);
+    padding-bottom:10px;
+  }
+  label{display:block; font-size:.85rem; color:var(--sub); margin:14px 0 6px;}
+  label:first-of-type{margin-top:0;}
+  input[type=text], input[type=number], textarea, select{
+    width:100%; background:var(--panel2); border:1px solid var(--line);
+    color:var(--text); border-radius:6px; padding:10px 12px; font-size:.92rem;
+    font-family:var(--mono); direction:ltr; text-align:left;
+  }
+  select{font-family:inherit; direction:rtl; text-align:right;}
+  textarea{min-height:70px; resize:vertical;}
+  .hint{font-size:.78rem; color:var(--sub); margin-top:4px;}
+  .row{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  @media(max-width:600px){.row{grid-template-columns:1fr;}}
+  .radio-group{display:flex; gap:18px; margin-top:4px;}
+  .radio-group label{display:flex; align-items:center; gap:6px; margin:0; font-size:.88rem; color:var(--text); cursor:pointer;}
+  .radio-group input{width:auto;}
+  button{
+    background:var(--accent); color:#06231b; border:none; border-radius:7px;
+    padding:13px 22px; font-size:.95rem; font-weight:700; cursor:pointer;
+    width:100%; margin-top:20px;
+  }
+  button:hover{filter:brightness(1.08);}
+  button:active{transform:translateY(1px);}
+  .out-block{margin-top:14px;}
+  .out-block label{display:flex; justify-content:space-between; align-items:center;}
+  .copy-btn{
+    background:none; border:1px solid var(--line); color:var(--sub);
+    width:auto; padding:3px 10px; font-size:.72rem; margin:0; border-radius:5px;
+  }
+  .out-value{
+    background:var(--panel2); border:1px solid var(--line); border-radius:6px;
+    padding:10px 12px; font-family:var(--mono); font-size:.8rem; word-break:break-all;
+    direction:ltr; text-align:left; color:var(--accent2);
+  }
+  #error{
+    display:none; background:#2b1414; border:1px solid var(--danger); color:var(--danger);
+    padding:12px 14px; border-radius:7px; margin-top:16px; font-size:.88rem;
+  }
+  #results{display:none;}
+  .field-key{color:var(--sub); font-size:.75rem; margin-bottom:2px;}
+  .warn{
+    background:#2a2210; border:1px solid var(--accent2); color:var(--accent2);
+    font-size:.82rem; padding:10px 14px; border-radius:7px; margin-bottom:16px;
+  }
+  code{font-family:var(--mono); color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>موقّع PSBT — إنفاق عبر مسار السكربت (Taproot Script-Path)</h1>
+  <div class="sub">يبني هذا الأداة PSBT يتضمّن صراحةً حقل <code>PSBT_IN_TAP_LEAF_SCRIPT</code> (BIP371)، ثم يوقّعه ويكمله (Finalize) إلى معاملة جاهزة للبث.</div>
+</header>
+
+<div class="warn">
+  ⚠️ هذه الأداة تعمل بالكامل داخل المتصفح ولا ترسل أي مفتاح خاص إلى أي خادم، لكنها تحمّل مكتبات التوقيع من CDN (jsdelivr) — تأكد من الاتصال بالإنترنت عند فتح الملف، وفضّل تجربتها على شبكة testnet قبل mainnet.
+</div>
+
+<section>
+  <h2>1) الشبكة والمفتاح</h2>
+  <label>الشبكة</label>
+  <select id="network">
+    <option value="mainnet">Bitcoin Mainnet</option>
+    <option value="testnet">Testnet</option>
+  </select>
+
+  <label>المفتاح الخاص (WIF)</label>
+  <input type="text" id="wif" placeholder="cN... أو K.../L... أو 5...">
+  <div class="hint">هذا المفتاح هو من سيوقّع السكربت (Tapleaf) — يجب أن يظهر مفتاحه العام x-only (32 بايت) داخل نص الـ Tapscript أدناه (مثلاً ضمن <code>OP_CHECKSIG</code>).</div>
+  <div class="out-value" id="derivedPubkey" style="margin-top:8px; display:none;"></div>
+</section>
+
+<section>
+  <h2>2) Tapscript والمفتاح الداخلي</h2>
+  <label>Tapscript (سداسي عشري / hex)</label>
+  <textarea id="tapscript" placeholder="مثال: 20<pubkey x-only 32 بايت>ac"></textarea>
+  <div class="hint">أدخل السكربت الكامل بصيغة hex (opcodes + بيانات)، كما يُبث في المعاملة.</div>
+
+  <div class="row">
+    <div>
+      <label>إصدار الـ Leaf (Leaf Version)</label>
+      <input type="text" id="leafVersion" value="0xc0">
+    </div>
+    <div>
+      <label>المفتاح الداخلي (Internal Key)</label>
+      <div class="radio-group">
+        <label><input type="radio" name="ikMode" value="nums" checked> نقطة NUMS الثابتة (يمنع إنفاق مسار المفتاح)</label>
+        <label><input type="radio" name="ikMode" value="wif"> اشتقاق من WIF أعلاه</label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>3) UTXO المراد إنفاقه</h2>
+  <div class="hint" style="margin-bottom:10px;">بيانات المُدخل (input) الذي يملك عنوان Taproot الناتج عن (المفتاح الداخلي + هذا الـ Tapscript).</div>
+  <div class="row">
+    <div>
+      <label>Txid</label>
+      <input type="text" id="txid" placeholder="معرّف المعاملة السابقة">
+    </div>
+    <div>
+      <label>رقم المخرج (vout)</label>
+      <input type="number" id="vout" value="0" min="0">
+    </div>
+  </div>
+  <label>قيمة المُدخل (بالساتوشي)</label>
+  <input type="number" id="utxoValue" placeholder="مثال: 100000">
+</section>
+
+<section>
+  <h2>4) الرسوم والوجهة</h2>
+  <div class="row">
+    <div>
+      <label>الرسوم (بالساتوشي)</label>
+      <input type="number" id="fee" placeholder="مثال: 500">
+    </div>
+    <div>
+      <label>عنوان الوجهة</label>
+      <input type="text" id="destination" placeholder="bc1p... / tb1p... / أي عنوان صالح">
+    </div>
+  </div>
+  <button id="buildBtn">بناء PSBT وتوقيعه وإكماله</button>
+</section>
+
+<div id="error"></div>
+
+<section id="results">
+  <h2>النتائج</h2>
+
+  <div class="out-block">
+    <label>عنوان Taproot المشتق (يجب أن يطابق مالك الـ UTXO أعلاه) <button class="copy-btn" data-copy="addrOut">نسخ</button></label>
+    <div class="out-value" id="addrOut"></div>
+  </div>
+
+  <div class="out-block">
+    <label>حقل PSBT_IN_TAP_LEAF_SCRIPT — Key (0x14 + control block) <button class="copy-btn" data-copy="fieldKeyOut">نسخ</button></label>
+    <div class="field-key">النوع 0x14، البيانات = control block</div>
+    <div class="out-value" id="fieldKeyOut"></div>
+  </div>
+
+  <div class="out-block">
+    <label>حقل PSBT_IN_TAP_LEAF_SCRIPT — Value (script || leaf version) <button class="copy-btn" data-copy="fieldValOut">نسخ</button></label>
+    <div class="out-value" id="fieldValOut"></div>
+  </div>
+
+  <div class="out-block">
+    <label>PSBT غير موقّع (Base64) <button class="copy-btn" data-copy="unsignedOut">نسخ</button></label>
+    <div class="out-value" id="unsignedOut"></div>
+  </div>
+
+  <div class="out-block">
+    <label>PSBT موقّع ومكتمل (Base64) <button class="copy-btn" data-copy="signedOut">نسخ</button></label>
+    <div class="out-value" id="signedOut"></div>
+  </div>
+
+  <div class="out-block">
+    <label>المعاملة النهائية (raw hex, جاهزة للبث) <button class="copy-btn" data-copy="rawTxOut">نسخ</button></label>
+    <div class="out-value" id="rawTxOut"></div>
+  </div>
+
+  <div class="out-block">
+    <label>Txid الناتج <button class="copy-btn" data-copy="txidOut">نسخ</button></label>
+    <div class="out-value" id="txidOut"></div>
+  </div>
+</section>
+
+</div>
+
+<script type="module">
+import * as bitcoin from 'https://cdn.jsdelivr.net/npm/bitcoinjs-lib@6.1.6/+esm';
+import * as ecc from 'https://cdn.jsdelivr.net/npm/@bitcoinerlab/secp256k1@1.1.1/+esm';
+import { ECPairFactory } from 'https://cdn.jsdelivr.net/npm/ecpair@2.1.0/+esm';
+import { Buffer } from 'https://cdn.jsdelivr.net/npm/buffer@6.0.3/+esm';
+
+bitcoin.initEccLib(ecc);
+const ECPair = ECPairFactory(ecc);
+
+// نقطة NUMS الموصى بها في BIP341 لتعطيل مسار المفتاح (key-path) والسماح فقط بمسار السكربت
+const NUMS_XONLY_HEX = '50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac';
+
+function toXOnly(pubkeyBuf) {
+  return pubkeyBuf.length === 32 ? pubkeyBuf : pubkeyBuf.slice(1, 33);
+}
+
+function hexToBuf(hex, label) {
+  const clean = (hex || '').trim().replace(/^0x/i, '').replace(/\s+/g, '');
+  if (!clean) throw new Error(`الحقل "${label}" فارغ`);
+  if (!/^[0-9a-fA-F]+$/.test(clean) || clean.length % 2 !== 0) {
+    throw new Error(`الحقل "${label}" ليس سداسي عشري صالح`);
+  }
+  return Buffer.from(clean, 'hex');
+}
+
+function parseLeafVersion(raw) {
+  const v = (raw || '').trim();
+  const n = v.toLowerCase().startsWith('0x') ? parseInt(v, 16) : parseInt(v, 10);
+  if (Number.isNaN(n) || n < 0 || n > 255) throw new Error('إصدار الـ leaf غير صالح');
+  return n;
+}
+
+function encodeVarInt(n) {
+  if (n < 0xfd) return Buffer.from([n]);
+  if (n <= 0xffff) { const b = Buffer.alloc(3); b[0] = 0xfd; b.writeUInt16LE(n, 1); return b; }
+  if (n <= 0xffffffff) { const b = Buffer.alloc(5); b[0] = 0xfe; b.writeUInt32LE(n, 1); return b; }
+  const b = Buffer.alloc(9); b[0] = 0xff; b.writeBigUInt64LE(BigInt(n), 1); return b;
+}
+
+function witnessStackToScriptWitness(witness) {
+  const parts = [encodeVarInt(witness.length)];
+  for (const item of witness) {
+    const buf = Buffer.from(item);
+    parts.push(encodeVarInt(buf.length));
+    parts.push(buf);
+  }
+  return Buffer.concat(parts);
+}
+
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.textContent = 'خطأ: ' + msg;
+  el.style.display = 'block';
+  document.getElementById('results').style.display = 'none';
+}
+function clearError() {
+  document.getElementById('error').style.display = 'none';
+}
+
+// عرض المفتاح العام x-only المشتق من WIF فور كتابته، للمساعدة على بناء السكربت
+document.getElementById('wif').addEventListener('input', () => {
+  const box = document.getElementById('derivedPubkey');
+  try {
+    const net = document.getElementById('network').value === 'testnet' ? bitcoin.networks.testnet : bitcoin.networks.bitcoin;
+    const wif = document.getElementById('wif').value.trim();
+    if (!wif) { box.style.display = 'none'; return; }
+    const kp = ECPair.fromWIF(wif, net);
+    const xonly = toXOnly(Buffer.from(kp.publicKey)).toString('hex');
+    box.textContent = 'المفتاح العام x-only المطلوب في السكربت: ' + xonly;
+    box.style.display = 'block';
+  } catch (e) {
+    box.style.display = 'none';
+  }
+});
+
+document.getElementById('buildBtn').addEventListener('click', () => {
+  clearError();
+  try {
+    const network = document.getElementById('network').value === 'testnet'
+      ? bitcoin.networks.testnet : bitcoin.networks.bitcoin;
+
+    const wif = document.getElementById('wif').value.trim();
+    if (!wif) throw new Error('أدخل المفتاح الخاص WIF');
+    const keyPair = ECPair.fromWIF(wif, network);
+
+    const leafScript = hexToBuf(document.getElementById('tapscript').value, 'Tapscript');
+    const leafVersion = parseLeafVersion(document.getElementById('leafVersion').value);
+
+    const ikMode = document.querySelector('input[name="ikMode"]:checked').value;
+    const internalPubkeyXOnly = ikMode === 'nums'
+      ? hexToBuf(NUMS_XONLY_HEX, 'NUMS')
+      : toXOnly(Buffer.from(keyPair.publicKey));
+
+    const scriptTree = { output: leafScript };
+    const p2tr = bitcoin.payments.p2tr({ internalPubkey: internalPubkeyXOnly, scriptTree, network });
+
+    const redeem = { output: leafScript, redeemVersion: leafVersion };
+    const p2trRedeem = bitcoin.payments.p2tr({ internalPubkey: internalPubkeyXOnly, scriptTree, redeem, network });
+    const controlBlock = p2trRedeem.witness[p2trRedeem.witness.length - 1];
+
+    const tapLeafScript = { leafVersion, script: leafScript, controlBlock };
+
+    const txid = document.getElementById('txid').value.trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(txid)) throw new Error('Txid يجب أن يكون 64 حرف hex');
+    const vout = parseInt(document.getElementById('vout').value, 10);
+    const utxoValue = parseInt(document.getElementById('utxoValue').value, 10);
+    const fee = parseInt(document.getElementById('fee').value, 10);
+    const destination = document.getElementById('destination').value.trim();
+    if (!destination) throw new Error('أدخل عنوان الوجهة');
+    if (Number.isNaN(utxoValue) || utxoValue <= 0) throw new Error('قيمة المُدخل غير صالحة');
+    if (Number.isNaN(fee) || fee < 0) throw new Error('قيمة الرسوم غير صالحة');
+    const sendAmount = utxoValue - fee;
+    if (sendAmount <= 0) throw new Error('الرسوم أكبر من أو تساوي قيمة المُدخل');
+
+    const psbt = new bitcoin.Psbt({ network });
+    psbt.addInput({
+      hash: txid,
+      index: vout,
+      witnessUtxo: { value: utxoValue, script: p2tr.output },
+      tapLeafScript: [tapLeafScript],
+    });
+    psbt.addOutput({ address: destination, value: sendAmount });
+
+    const unsignedBase64 = psbt.toBase64();
+
+    // التوقيع: bitcoinjs-lib يحدد تلقائياً أي leaf يوقّع من خلال مطابقة المفتاح العام x-only
+    // مع البيانات الموجودة داخل نص الـ Tapscript
+    psbt.signInput(0, keyPair);
+
+    psbt.finalizeInput(0, (inputIndex, input) => {
+      if (!input.tapScriptSig || !input.tapScriptSig.length) {
+        throw new Error('لم يتم العثور على توقيع مطابق — تأكد أن المفتاح العام x-only للـ WIF موجود فعلياً داخل نص الـ Tapscript');
+      }
+      const sig = input.tapScriptSig[0].signature;
+      const witness = [sig, tapLeafScript.script, tapLeafScript.controlBlock];
+      return { finalScriptWitness: witnessStackToScriptWitness(witness) };
+    });
+
+    const tx = psbt.extractTransaction();
+    const rawHex = tx.toHex();
+    const finalTxid = tx.getId();
+    const signedBase64 = psbt.toBase64();
+
+    // بناء حقل PSBT_IN_TAP_LEAF_SCRIPT يدوياً للعرض الصريح (BIP371: النوع 0x14)
+    const fieldKey = Buffer.concat([Buffer.from([0x14]), controlBlock]);
+    const fieldValue = Buffer.concat([leafScript, Buffer.from([leafVersion])]);
+
+    document.getElementById('addrOut').textContent = p2tr.address;
+    document.getElementById('fieldKeyOut').textContent = fieldKey.toString('hex');
+    document.getElementById('fieldValOut').textContent = fieldValue.toString('hex');
+    document.getElementById('unsignedOut').textContent = unsignedBase64;
+    document.getElementById('signedOut').textContent = signedBase64;
+    document.getElementById('rawTxOut').textContent = rawHex;
+    document.getElementById('txidOut').textContent = finalTxid;
+    document.getElementById('results').style.display = 'block';
+  } catch (e) {
+    showError(e.message || String(e));
+  }
+});
+
+document.querySelectorAll('.copy-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const target = document.getElementById(btn.dataset.copy);
+    if (!target) return;
+    navigator.clipboard.writeText(target.textContent).then(() => {
+      const old = btn.textContent;
+      btn.textContent = 'تم النسخ';
+      setTimeout(() => { btn.textContent = old; }, 1200);
+    });
+  });
+});
+</script>
+</body>
+</html>
